@@ -1,0 +1,47 @@
+name: Apply infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_apply:
+        description: Apply Terraform changes to the configured GCP project
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: inputs.confirm_apply
+    runs-on: ubuntu-latest
+    environment: infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Initialize remote state
+        working-directory: infra/terraform
+        run: terraform init -lockfile=readonly -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="prefix=sre-pretest"
+
+      - name: Preview infrastructure changes
+        working-directory: infra/terraform
+        run: terraform plan -out=tfplan
+
+      - name: Apply infrastructure changes
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve tfplan

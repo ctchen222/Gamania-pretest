@@ -1,0 +1,8 @@
+replicaCount: 1
+image:
+  repository: asia-east1-docker.pkg.dev/REPLACE_WITH_GCP_PROJECT_ID/sre-pretest/nginx
+  tag: latest
+ingress:
+  enabled: false
+cloudArmor:
+  enabled: false

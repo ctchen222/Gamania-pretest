@@ -1,0 +1,69 @@
+name: CI and image publish
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GCP_REGION: asia-east1
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE_NAME: sre-pretest/nginx
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Check Terraform formatting and configuration
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -lockfile=readonly
+          terraform validate
+
+      - name: Check Helm chart
+        run: |
+          helm lint deploy/chart
+          helm template sre-web deploy/chart -f deploy/chart/values-local.yaml
+          helm template sre-web deploy/chart -f deploy/chart/values-beta.yaml
+          helm template sre-web deploy/chart -f deploy/chart/values-production.yaml
+
+      - name: Build application image
+        run: docker build -t sre-nginx:${GITHUB_SHA} ./app
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker ${GCP_REGION}-docker.pkg.dev --quiet
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}

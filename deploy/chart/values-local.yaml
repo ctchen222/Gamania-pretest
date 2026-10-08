@@ -1,0 +1,9 @@
+image:
+  repository: sre-nginx
+  tag: local
+
+ingress:
+  enabled: false
+
+cloudArmor:
+  enabled: false
